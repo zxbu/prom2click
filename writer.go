@@ -13,8 +13,8 @@ import (
 )
 
 var insertSQL = `INSERT INTO %s.%s
-	(date, name, tags, val, ts)
-	VALUES	(?, ?, ?, ?, ?)`
+	(name, tags, val, ts)
+	VALUES	(?, ?, ?, ?)`
 
 type p2cWriter struct {
 	conf     *config
@@ -79,7 +79,7 @@ func (w *p2cWriter) Start() {
 	go func() {
 		w.wg.Add(1)
 		fmt.Println("Writer starting..")
-		sql := fmt.Sprintf(insertSQL, w.conf.ChDB, w.conf.ChTable)
+		sqlString := fmt.Sprintf(insertSQL, w.conf.ChDB, w.conf.ChTable)
 		ok := true
 		for ok {
 			w.test.Add(1)
@@ -113,18 +113,16 @@ func (w *p2cWriter) Start() {
 			}
 
 			// build statements
-			smt, err := tx.Prepare(sql)
+			smt, err := tx.Prepare(sqlString)
+			if err != nil {
+				fmt.Printf("Error: prepare statement: %s\n", err.Error())
+				w.ko.Add(1.0)
+			}
 			for _, req := range reqs {
-				if err != nil {
-					fmt.Printf("Error: prepare statement: %s\n", err.Error())
-					w.ko.Add(1.0)
-					continue
-				}
-
 				// ensure tags are inserted in the same order each time
 				// possibly/probably impacts indexing?
 				sort.Strings(req.tags)
-				_, err = smt.Exec(req.ts, req.name, clickhouse.Array(req.tags),
+				_, err = smt.Exec(req.name, clickhouse.Array(req.tags),
 					req.val, req.ts)
 
 				if err != nil {
