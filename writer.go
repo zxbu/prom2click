@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Shopify/sarama"
+	"math"
 	"strings"
 	"sync"
 
@@ -63,10 +64,10 @@ func newKafka(conf *config) (sarama.AsyncProducer, error) {
 }
 
 type p2cRequestJson struct {
-	Name string   `json:"name"`
-	Tags []string `json:"tags"`
-	Val  float64  `json:"val"`
-	Ts   int64    `json:"ts"`
+	Name string      `json:"name"`
+	Tags []string    `json:"tags"`
+	Val  interface{} `json:"val"`
+	Ts   int64       `json:"ts"`
 }
 
 func (w *p2cWriter) Start() {
@@ -86,11 +87,15 @@ func (w *p2cWriter) Start() {
 			reqJson := new(p2cRequestJson)
 			reqJson.Name = req.name
 			reqJson.Tags = req.tags
-			reqJson.Val = req.val
+			if math.IsNaN(req.val) {
+				reqJson.Val = "NaN"
+			} else {
+				reqJson.Val = req.val
+			}
 			reqJson.Ts = req.ts.Unix()
 			jsonMarshal, jsonErr := json.Marshal(&reqJson)
 			if jsonErr != nil {
-				fmt.Printf("Error Marshal json, name: %s,  error: %s\n", reqJson.Name, jsonErr.Error())
+				fmt.Printf("Error Marshal json, name: %s, val: %f,  error: %s\n", reqJson.Name, req.val, jsonErr.Error())
 				continue
 			}
 			//fmt.Printf("json: %s\n", jsonMarshal)
