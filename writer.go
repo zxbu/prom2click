@@ -136,6 +136,7 @@ func (w *p2cWriter) Start() {
 				fmt.Printf("Error: commit failed: %s\n", err.Error())
 				w.ko.Add(1.0)
 			} else {
+				fmt.Printf("%s - Write metrics success: %d\n", time.Now().String(), nmetrics)
 				w.tx.Add(float64(nmetrics))
 				w.timings.Observe(float64(time.Since(tstart)))
 			}
