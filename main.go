@@ -15,7 +15,6 @@ type config struct {
 	ChDSN           string
 	ChDB            string
 	ChTable         string
-	ChBatch         int
 	ChanSize        int
 	CHQuantile      float64
 	CHMaxSamples    int
@@ -24,6 +23,8 @@ type config struct {
 	HTTPAddr        string
 	HTTPWritePath   string
 	HTTPMetricsPath string
+	KafkaAddress    string // kafka地址
+	KafkaTopic      string // topic
 }
 
 var (
@@ -90,11 +91,6 @@ func parseFlags() *config {
 		"The clickhouse table to write to.",
 	)
 
-	// clickhouse insertion batch size
-	flag.IntVar(&cfg.ChBatch, "ch.batch", 8192,
-		"Clickhouse write batch size (n metrics).",
-	)
-
 	// channel buffer size between http server => clickhouse writer(s)
 	flag.IntVar(&cfg.ChanSize, "ch.buffer", 8192,
 		"Maximum internal channel buffer size (n requests).",
@@ -145,6 +141,9 @@ func parseFlags() *config {
 	flag.DurationVar(&cfg.HTTPTimeout, "web.timeout", 30*time.Second,
 		"The timeout to use for HTTP requests and server shutdown. Defaults to 30s.",
 	)
+
+	flag.StringVar(&cfg.KafkaAddress, "kafka.address", "", "Kafka地址")
+	flag.StringVar(&cfg.KafkaTopic, "kafka.topic", "samples", "Kafka topic")
 
 	flag.Parse()
 

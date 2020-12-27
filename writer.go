@@ -1,30 +1,22 @@
 package main
 
 import (
-	"database/sql"
+	"encoding/json"
 	"fmt"
-	"sort"
-	"time"
-
+	"github.com/Shopify/sarama"
+	"strings"
 	"sync"
 
-	"github.com/kshvakov/clickhouse"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-var insertSQL = `INSERT INTO %s.%s
-	(name, tags, val, ts)
-	VALUES	(?, ?, ?, ?)`
-
 type p2cWriter struct {
-	conf     *config
-	requests chan *p2cRequest
-	wg       sync.WaitGroup
-	db       *sql.DB
-	tx       prometheus.Counter
-	ko       prometheus.Counter
-	test     prometheus.Counter
-	timings  prometheus.Histogram
+	conf          *config
+	requests      chan *p2cRequest
+	wg            sync.WaitGroup
+	kafkaProducer sarama.AsyncProducer
+	tx            prometheus.Counter
+	ko            prometheus.Counter
 }
 
 func NewP2CWriter(conf *config, reqs chan *p2cRequest) (*p2cWriter, error) {
@@ -32,9 +24,9 @@ func NewP2CWriter(conf *config, reqs chan *p2cRequest) (*p2cWriter, error) {
 	w := new(p2cWriter)
 	w.conf = conf
 	w.requests = reqs
-	w.db, err = sql.Open("clickhouse", w.conf.ChDSN)
+	w.kafkaProducer, err = newKafka(conf)
 	if err != nil {
-		fmt.Printf("Error connecting to clickhouse: %s\n", err.Error())
+		fmt.Printf("Error connecting to kafka: %s\n", err.Error())
 		return w, err
 	}
 
@@ -52,26 +44,29 @@ func NewP2CWriter(conf *config, reqs chan *p2cRequest) (*p2cWriter, error) {
 		},
 	)
 
-	w.test = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Name: "prometheus_remote_storage_sent_batch_duration_seconds_bucket_test",
-			Help: "Test metric to ensure backfilled metrics are readable via prometheus.",
-		},
-	)
-
-	w.timings = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Name:    "sent_batch_duration_seconds",
-			Help:    "Duration of sample batch send calls to the remote storage.",
-			Buckets: prometheus.DefBuckets,
-		},
-	)
 	prometheus.MustRegister(w.tx)
 	prometheus.MustRegister(w.ko)
-	prometheus.MustRegister(w.test)
-	prometheus.MustRegister(w.timings)
 
 	return w, nil
+}
+
+func newKafka(conf *config) (sarama.AsyncProducer, error) {
+	kafkaConfig := sarama.NewConfig()
+	kafkaConfig.Producer.RequiredAcks = sarama.WaitForAll
+	kafkaConfig.Producer.Partitioner = sarama.NewRandomPartitioner
+	kafkaConfig.Producer.Return.Successes = true
+	kafkaConfig.Producer.Return.Errors = true
+	kafkaConfig.Producer.Retry.Max = 3
+	adders := strings.Split(conf.KafkaAddress, ",")
+	producer, err := sarama.NewAsyncProducer(adders, kafkaConfig)
+	return producer, err
+}
+
+type p2cRequestJson struct {
+	Name string   `json:"name"`
+	Tags []string `json:"tags"`
+	Val  float64  `json:"val"`
+	Ts   int64    `json:"ts"`
 }
 
 func (w *p2cWriter) Start() {
@@ -79,69 +74,44 @@ func (w *p2cWriter) Start() {
 	go func() {
 		w.wg.Add(1)
 		fmt.Println("Writer starting..")
-		sqlString := fmt.Sprintf(insertSQL, w.conf.ChDB, w.conf.ChTable)
 		ok := true
+		producer := w.kafkaProducer
 		for ok {
-			w.test.Add(1)
 			// get next batch of requests
-			var reqs []*p2cRequest
-
-			tstart := time.Now()
-			for i := 0; i < w.conf.ChBatch; i++ {
-				var req *p2cRequest
-				// get requet and also check if channel is closed
-				req, ok = <-w.requests
-				if !ok {
-					fmt.Println("Writer stopping..")
-					break
-				}
-				reqs = append(reqs, req)
+			var req *p2cRequest
+			req, ok = <-w.requests
+			if !ok {
+				break
 			}
-
-			// ensure we have something to send..
-			nmetrics := len(reqs)
-			if nmetrics < 1 {
+			reqJson := new(p2cRequestJson)
+			reqJson.Name = req.name
+			reqJson.Tags = req.tags
+			reqJson.Val = req.val
+			reqJson.Ts = req.ts.Unix()
+			jsonMarshal, jsonErr := json.Marshal(&reqJson)
+			if jsonErr != nil {
+				fmt.Printf("Error Marshal json, name: %s,  error: %s\n", reqJson.Name, jsonErr.Error())
 				continue
 			}
-
-			// post them to db all at once
-			tx, err := w.db.Begin()
-			if err != nil {
-				fmt.Printf("Error: begin transaction: %s\n", err.Error())
-				w.ko.Add(1.0)
-				continue
+			//fmt.Printf("json: %s\n", jsonMarshal)
+			msg := sarama.ProducerMessage{
+				Topic: w.conf.KafkaTopic,
+				Value: sarama.ByteEncoder(jsonMarshal),
 			}
 
-			// build statements
-			smt, err := tx.Prepare(sqlString)
-			if err != nil {
-				fmt.Printf("Error: prepare statement: %s\n", err.Error())
-				w.ko.Add(1.0)
-			}
-			for _, req := range reqs {
-				// ensure tags are inserted in the same order each time
-				// possibly/probably impacts indexing?
-				sort.Strings(req.tags)
-				_, err = smt.Exec(req.name, clickhouse.Array(req.tags),
-					req.val, req.ts)
+			producer.Input() <- &msg
 
-				if err != nil {
-					fmt.Printf("Error: statement exec: %s\n", err.Error())
-					w.ko.Add(1.0)
-				}
-			}
-
-			// commit and record metrics
-			if err = tx.Commit(); err != nil {
-				fmt.Printf("Error: commit failed: %s\n", err.Error())
+			select {
+			case <-producer.Successes():
+				w.tx.Add(1.0)
+				//fmt.Printf("offset: %d,  timestamp: %s", suc.Offset, suc.Timestamp.String())
+			case fail := <-producer.Errors():
 				w.ko.Add(1.0)
-			} else {
-				fmt.Printf("%s - Write metrics success: %d\n", time.Now().String(), nmetrics)
-				w.tx.Add(float64(nmetrics))
-				w.timings.Observe(float64(time.Since(tstart)))
+				fmt.Printf("producer err: %s\n", fail.Err.Error())
 			}
 
 		}
+		defer producer.AsyncClose()
 		fmt.Println("Writer stopped..")
 		w.wg.Done()
 	}()

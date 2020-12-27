@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	_ "github.com/kshvakov/clickhouse"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/storage/remote"
 )
