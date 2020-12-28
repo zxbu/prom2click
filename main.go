@@ -92,7 +92,7 @@ func parseFlags() *config {
 	)
 
 	// channel buffer size between http server => clickhouse writer(s)
-	flag.IntVar(&cfg.ChanSize, "ch.buffer", 8192,
+	flag.IntVar(&cfg.ChanSize, "ch.buffer", 1024,
 		"Maximum internal channel buffer size (n requests).",
 	)
 

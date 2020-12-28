@@ -1,10 +1,10 @@
-module github.com/zxbu/prom2click
+module prom2click
 
 go 1.15
 
 require (
 	github.com/Shopify/sarama v1.27.2
-	github.com/sirupsen/logrus v1.0.0
+	github.com/Sirupsen/logrus v1.7.0 // indirect
 	github.com/beorn7/perks v0.0.0-20160804104726-4c0e84591b9a
 	github.com/golang/protobuf v0.0.0-20170601230230-5a0f697c9ed9
 	github.com/golang/snappy v0.0.1
@@ -16,6 +16,7 @@ require (
 	github.com/prometheus/common v0.0.0-20170427095455-13ba4ddd0caa
 	github.com/prometheus/procfs v0.0.0-20170609123208-a3bfc74126ea
 	github.com/prometheus/prometheus v1.7.0
+	github.com/sirupsen/logrus v1.0.0
 	github.com/syndtr/goleveldb v0.0.0-20170409015612-8c81ea47d4c4
 	golang.org/x/net v0.0.0-20201224014010-6772e930b67b // indirect
 	golang.org/x/sys v0.0.0-20201223074533-0d417f636930 // indirect
@@ -23,3 +24,5 @@ require (
 	gopkg.in/tylerb/graceful.v1 v1.2.15
 	gopkg.in/yaml.v2 v2.0.0-20170407172122-cd8b52f8269e
 )
+
+replace github.com/Sirupsen/logrus v1.7.0 => github.com/sirupsen/logrus v1.7.0

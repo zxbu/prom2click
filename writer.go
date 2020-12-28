@@ -71,17 +71,31 @@ type p2cRequestJson struct {
 }
 
 func (w *p2cWriter) Start() {
+	producer := w.kafkaProducer
+
+	go func() {
+		for true {
+			select {
+			case <-producer.Successes():
+				w.tx.Add(1.0)
+				//fmt.Printf("offset: %d,  timestamp: %s", suc.Offset, suc.Timestamp.String())
+			case fail := <-producer.Errors():
+				w.ko.Add(1.0)
+				fmt.Printf("producer err: %s\n", fail.Err.Error())
+			}
+		}
+	}()
 
 	go func() {
 		w.wg.Add(1)
 		fmt.Println("Writer starting..")
 		ok := true
-		producer := w.kafkaProducer
 		for ok {
 			// get next batch of requests
 			var req *p2cRequest
 			req, ok = <-w.requests
 			if !ok {
+				fmt.Printf("receive chan error, break.\n")
 				break
 			}
 			reqJson := new(p2cRequestJson)
@@ -89,6 +103,10 @@ func (w *p2cWriter) Start() {
 			reqJson.Tags = req.tags
 			if math.IsNaN(req.val) {
 				reqJson.Val = "NaN"
+			} else if math.IsInf(req.val, 1) {
+				reqJson.Val = "Inf"
+			} else if math.IsInf(req.val, -1) {
+				reqJson.Val = "-Inf"
 			} else {
 				reqJson.Val = req.val
 			}
@@ -105,16 +123,6 @@ func (w *p2cWriter) Start() {
 			}
 
 			producer.Input() <- &msg
-
-			select {
-			case <-producer.Successes():
-				w.tx.Add(1.0)
-				//fmt.Printf("offset: %d,  timestamp: %s", suc.Offset, suc.Timestamp.String())
-			case fail := <-producer.Errors():
-				w.ko.Add(1.0)
-				fmt.Printf("producer err: %s\n", fail.Err.Error())
-			}
-
 		}
 		defer producer.AsyncClose()
 		fmt.Println("Writer stopped..")
