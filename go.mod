@@ -4,7 +4,7 @@ go 1.15
 
 require (
 	github.com/Shopify/sarama v1.27.2
-	github.com/Sirupsen/logrus v1.0.0
+	github.com/sirupsen/logrus v1.0.0
 	github.com/beorn7/perks v0.0.0-20160804104726-4c0e84591b9a
 	github.com/golang/protobuf v0.0.0-20170601230230-5a0f697c9ed9
 	github.com/golang/snappy v0.0.1
