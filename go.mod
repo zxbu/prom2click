@@ -1,4 +1,4 @@
-module prom2click
+module github.com/zxbu/prom2click
 
 go 1.15
 
